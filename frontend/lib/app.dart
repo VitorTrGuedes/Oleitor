@@ -94,6 +94,7 @@ class _AppShellState extends State<_AppShell> {
       LibraryHomeScreen(
         apiClient: widget.apiClient,
         onExplore: () => setState(() => _selectedIndex = 1),
+        isActive: _selectedIndex == 0,
       ),
       DiscoverScreen(apiClient: widget.apiClient),
       const FavoritesScreen(),

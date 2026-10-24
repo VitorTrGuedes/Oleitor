@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import 'local_progress_store.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -51,6 +52,58 @@ class ApiClient {
     final result = await _get('/api/v1/manga', query: query) as List<dynamic>;
     return result
         .map((item) => Manga.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<PopularManga>> getPopularManga({int limit = 20}) async {
+    final result = await _get(
+      '/api/v1/popular-manga',
+      query: {'limit': '$limit'},
+    ) as List<dynamic>;
+    return result
+        .map(
+          (item) => PopularManga.fromJson(item as Map<String, dynamic>),
+        )
+        .toList();
+  }
+
+  Future<void> recordReadEvent(Manga manga) async {
+    final response = await _client.post(
+      _uri('/api/v1/reading-events'),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Device-Id': await LocalProgressStore.getDeviceId(),
+      },
+      body: jsonEncode({
+        'source_id': manga.sourceId ?? 'library',
+        'manga_id': manga.id,
+        'title': manga.title,
+        'author': manga.author,
+        'description': manga.description,
+        'cover_url': manga.coverUrl,
+        'source_url': manga.sourceUrl,
+        'language': manga.language,
+        'supports_reading': manga.supportsReading,
+      }),
+    );
+    _decode(response);
+  }
+
+  Future<List<Manga>> getRecommendations(List<Manga> favorites) async {
+    if (favorites.isEmpty) return [];
+    final response = await _client.post(
+      _uri('/api/v1/recommendations'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'favorite_titles':
+            favorites.take(5).map((favorite) => favorite.title).toList(),
+      }),
+    );
+    final result = _decode(response) as List<dynamic>;
+    return result
+        .map(
+          (item) => Manga.fromSourceJson(item as Map<String, dynamic>),
+        )
         .toList();
   }
 
@@ -109,7 +162,8 @@ class ApiClient {
   }
 
   Future<List<Chapter>> getChapters(String mangaId) async {
-    final result = await _get('/api/v1/manga/$mangaId/chapters') as List<dynamic>;
+    final result =
+        await _get('/api/v1/manga/$mangaId/chapters') as List<dynamic>;
     return result
         .map((item) => Chapter.fromJson(item as Map<String, dynamic>))
         .toList();

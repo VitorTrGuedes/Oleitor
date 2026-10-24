@@ -84,3 +84,28 @@ class ReadingProgress(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ReadingEvent(Base):
+    __tablename__ = "reading_event"
+    __table_args__ = (
+        UniqueConstraint(
+            "device_id",
+            "source_id",
+            "manga_id",
+            name="uq_read_event_device_source_manga",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=new_id)
+    device_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    manga_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(String(4000))
+    cover_url: Mapped[str | None] = mapped_column(String(2048))
+    source_url: Mapped[str | None] = mapped_column(String(2048))
+    language: Mapped[str] = mapped_column(String(16), nullable=False, default="pt-BR")
+    supports_reading: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

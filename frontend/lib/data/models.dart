@@ -49,6 +49,36 @@ class Manga {
       );
 }
 
+class PopularManga {
+  const PopularManga({
+    required this.manga,
+    required this.readCount,
+  });
+
+  final Manga manga;
+  final int readCount;
+
+  factory PopularManga.fromJson(Map<String, dynamic> json) {
+    final sourceId = json['source_id'] as String?;
+    return PopularManga(
+      manga: Manga(
+        id: sourceId == null
+            ? json['id'] as String
+            : json['source_manga_id'] as String,
+        title: json['title'] as String,
+        language: json['language'] as String? ?? 'pt-BR',
+        author: json['author'] as String?,
+        description: json['description'] as String?,
+        coverUrl: json['cover_url'] as String?,
+        sourceId: sourceId,
+        sourceUrl: json['source_url'] as String?,
+        supportsReading: json['supports_reading'] as bool? ?? true,
+      ),
+      readCount: json['read_count'] as int,
+    );
+  }
+}
+
 class Chapter {
   const Chapter({
     required this.id,

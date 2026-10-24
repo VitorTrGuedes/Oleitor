@@ -30,6 +30,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _showSaveError = false;
   bool _initialProgressSaved = false;
   bool _initialPageAdjusted = false;
+  bool _readEventRecorded = false;
   Future<void> _saveQueue = Future<void>.value();
 
   @override
@@ -60,6 +61,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
       try {
         final deviceId = await LocalProgressStore.getDeviceId();
         await LocalProgressStore.saveProgress(progress);
+        if (!_readEventRecorded) {
+          await _api.recordReadEvent(widget.manga);
+          _readEventRecorded = true;
+        }
         if (!widget.manga.isExternal) {
           await _api.saveProgress(
             deviceId: deviceId,

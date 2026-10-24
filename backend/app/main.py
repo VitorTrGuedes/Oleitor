@@ -3,28 +3,43 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from sqlalchemy import select
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import Chapter, Manga, Page, ReadingProgress
+from app.models import Chapter, Manga, Page, ReadingEvent, ReadingProgress
 from app.schemas import (
     ChapterOut,
     MangaOut,
     PageOut,
+    PopularMangaOut,
     ProgressOut,
     ProgressUpdate,
+    ReadEventCreate,
+    ReadEventResult,
+    RecommendationRequest,
     SourceChapterOut,
     SourceMangaOut,
     SourceOut,
     SourcePageOut,
 )
 from app.sources import source_registry
+from app.sources.anilist import AniListProvider
 from app.sources.base import SourceError, SourceProvider
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Oleitor API", version="0.1.0")
+if settings.environment == "development":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 DbSession = Annotated[Session, Depends(get_db)]
 DeviceId = Annotated[str, Header(alias="X-Device-Id", min_length=1, max_length=128)]
 logger = logging.getLogger(__name__)
@@ -138,6 +153,144 @@ def list_manga(
     if search and search.strip():
         statement = statement.where(Manga.title.ilike(f"%{search.strip()}%"))
     return list(db.scalars(statement))
+
+
+@app.post("/api/v1/reading-events", response_model=ReadEventResult)
+def record_read_event(
+    event: ReadEventCreate,
+    device_id: DeviceId,
+    db: DbSession,
+) -> ReadEventResult:
+    if event.source_id == "library":
+        manga = db.get(Manga, event.manga_id)
+        if manga is None:
+            raise HTTPException(status_code=404, detail="Mangá não encontrado")
+        source_id = "library"
+        manga_id = manga.id
+        values = {
+            "title": manga.title,
+            "author": manga.author,
+            "description": manga.description,
+            "cover_url": manga.cover_url,
+            "source_url": None,
+            "language": manga.language,
+            "supports_reading": True,
+        }
+    else:
+        try:
+            provider = source_registry.get(event.source_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Fonte não encontrada") from exc
+        if not provider.supports_reading:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A fonte {provider.name} não oferece leitura.",
+            )
+        source_id = provider.source_id
+        manga_id = event.manga_id
+        values = {
+            "title": event.title,
+            "author": event.author,
+            "description": event.description,
+            "cover_url": str(event.cover_url) if event.cover_url else None,
+            "source_url": str(event.source_url) if event.source_url else None,
+            "language": event.language,
+            "supports_reading": provider.supports_reading,
+        }
+
+    existing = db.scalar(
+        select(ReadingEvent.id).where(
+            ReadingEvent.device_id == device_id,
+            ReadingEvent.source_id == source_id,
+            ReadingEvent.manga_id == manga_id,
+        )
+    )
+    if existing is not None:
+        return ReadEventResult(recorded=False)
+
+    try:
+        db.add(
+            ReadingEvent(
+                device_id=device_id,
+                source_id=source_id,
+                manga_id=manga_id,
+                **values,
+            )
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(
+            select(ReadingEvent.id).where(
+                ReadingEvent.device_id == device_id,
+                ReadingEvent.source_id == source_id,
+                ReadingEvent.manga_id == manga_id,
+            )
+        )
+        if existing is None:
+            raise
+        return ReadEventResult(recorded=False)
+    return ReadEventResult(recorded=True)
+
+
+@app.get("/api/v1/popular-manga", response_model=list[PopularMangaOut])
+def list_popular_manga(
+    db: DbSession,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[PopularMangaOut]:
+    read_count = func.count(ReadingEvent.id)
+    statement = (
+        select(
+            ReadingEvent.source_id,
+            ReadingEvent.manga_id,
+            func.min(ReadingEvent.title).label("title"),
+            func.min(ReadingEvent.author).label("author"),
+            func.min(ReadingEvent.description).label("description"),
+            func.min(ReadingEvent.cover_url).label("cover_url"),
+            func.min(ReadingEvent.source_url).label("source_url"),
+            func.min(ReadingEvent.language).label("language"),
+            func.min(ReadingEvent.supports_reading).label("supports_reading"),
+            read_count.label("read_count"),
+        )
+        .group_by(ReadingEvent.source_id, ReadingEvent.manga_id)
+        .order_by(read_count.desc(), func.min(ReadingEvent.title))
+        .limit(limit)
+    )
+    results = []
+    for row in db.execute(statement):
+        is_library_manga = row.source_id == "library"
+        results.append(
+            PopularMangaOut(
+                id=row.manga_id,
+                title=row.title,
+                author=row.author,
+                description=row.description,
+                cover_url=row.cover_url,
+                language=row.language,
+                source_id=None if is_library_manga else row.source_id,
+                source_manga_id=None if is_library_manga else row.manga_id,
+                source_url=row.source_url,
+                supports_reading=row.supports_reading,
+                read_count=row.read_count,
+            )
+        )
+    return results
+
+
+@app.post("/api/v1/recommendations", response_model=list[SourceMangaOut])
+def list_recommendations(
+    request: RecommendationRequest,
+) -> list[SourceMangaOut]:
+    provider = source_registry.get("anilist")
+    if not isinstance(provider, AniListProvider):
+        raise HTTPException(
+            status_code=503,
+            detail="O serviço de recomendações não está disponível.",
+        )
+    try:
+        return provider.recommendations(request.favorite_titles, limit=20)
+    except SourceError as exc:
+        raise source_failure(provider, exc) from exc
 
 
 @app.get("/api/v1/manga/{manga_id}", response_model=MangaOut)

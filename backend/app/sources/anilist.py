@@ -31,6 +31,35 @@ query ($search: String!, $page: Int!, $perPage: Int!) {
 }
 """
 
+_RECOMMENDATIONS_QUERY = """
+query ($search: String!, $perPage: Int!) {
+  Page(page: 1, perPage: 1) {
+    media(search: $search, type: MANGA, isAdult: false) {
+      recommendations(perPage: $perPage, sort: RATING_DESC) {
+        nodes {
+          mediaRecommendation {
+            id
+            title {
+              english
+              romaji
+              native
+            }
+            description(asHtml: false)
+            coverImage {
+              extraLarge
+              large
+            }
+            siteUrl
+            countryOfOrigin
+            status
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 class AniListProvider:
     source_id = "anilist"
@@ -71,6 +100,58 @@ class AniListProvider:
         ):
             raise SourceError("O AniList retornou uma lista de títulos inválida.")
         return [self._manga_from_item(item) for item in media]
+
+    def recommendations(
+        self,
+        favorite_titles: list[str],
+        limit: int,
+    ) -> list[SourceMangaOut]:
+        results: list[SourceMangaOut] = []
+        seen_ids: set[str] = set()
+        for title in favorite_titles:
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            payload = self._request(
+                {
+                    "query": _RECOMMENDATIONS_QUERY,
+                    "variables": {
+                        "search": title,
+                        "perPage": min(remaining, 10),
+                    },
+                }
+            )
+            data = payload.get("data")
+            page = data.get("Page") if isinstance(data, dict) else None
+            media = page.get("media") if isinstance(page, dict) else None
+            if not isinstance(media, list) or not all(
+                isinstance(item, dict) for item in media
+            ):
+                raise SourceError("O AniList retornou recomendações inválidas.")
+            if not media:
+                continue
+            recommendations = media[0].get("recommendations")
+            if not isinstance(recommendations, dict):
+                continue
+            nodes = recommendations.get("nodes")
+            if not isinstance(nodes, list):
+                raise SourceError("O AniList retornou recomendações inválidas.")
+            for node in nodes:
+                recommendation = (
+                    node.get("mediaRecommendation")
+                    if isinstance(node, dict)
+                    else None
+                )
+                if not isinstance(recommendation, dict):
+                    continue
+                manga = self._manga_from_item(recommendation)
+                if manga.source_manga_id in seen_ids:
+                    continue
+                seen_ids.add(manga.source_manga_id)
+                results.append(manga)
+                if len(results) >= limit:
+                    break
+        return results
 
     def list_chapters(
         self,

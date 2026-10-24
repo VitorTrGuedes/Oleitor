@@ -82,12 +82,22 @@ HTTP em produção; publique a API com HTTPS.
 - `GET /api/v1/chapters/{chapter_id}/pages`
 - `GET /api/v1/reading-progress`
 - `PUT /api/v1/reading-progress`
+- `POST /api/v1/reading-events`
+- `GET /api/v1/popular-manga`
+- `POST /api/v1/recommendations`
 
 As rotas de progresso exigem `X-Device-Id` para separar os dados locais entre
 instalações. Isso **não é autenticação**. Este MVP é para desenvolvimento
 local: antes de expor a API a outros usuários, implemente autenticação,
 autorização por recurso, HTTPS e controles de abuso. O aplicativo não contém
 segredos de servidor.
+
+O ranking registra uma leitura por obra e instalação quando o leitor abre o
+primeiro capítulo. O backend mantém o identificador aleatório da instalação e
+os dados básicos da obra para agregar esse ranking; não é uma contagem de
+páginas lidas e, sem autenticação, pode ser manipulada. Para gerar sugestões,
+o backend envia ao AniList os títulos de até cinco obras favoritas; nenhum
+identificador da instalação é enviado nessa consulta.
 
 ## Testes
 

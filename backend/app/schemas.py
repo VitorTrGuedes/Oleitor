@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
@@ -50,6 +51,42 @@ class ProgressOut(BaseModel):
     chapter_id: str
     page_number: int
     updated_at: datetime
+
+
+class ReadEventCreate(BaseModel):
+    source_id: str = Field(min_length=1, max_length=50)
+    manga_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=200)
+    author: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    cover_url: HttpUrl | None = None
+    source_url: HttpUrl | None = None
+    language: str = Field(default="pt-BR", max_length=16)
+    supports_reading: bool = True
+
+
+class ReadEventResult(BaseModel):
+    recorded: bool
+
+
+class PopularMangaOut(BaseModel):
+    id: str
+    title: str
+    author: str | None
+    description: str | None
+    cover_url: HttpUrl | None
+    language: str
+    source_id: str | None
+    source_manga_id: str | None
+    source_url: HttpUrl | None
+    supports_reading: bool
+    read_count: int
+
+
+class RecommendationRequest(BaseModel):
+    favorite_titles: list[Annotated[str, Field(min_length=1, max_length=200)]] = (
+        Field(min_length=1, max_length=5)
+    )
 
 
 class SourceOut(BaseModel):

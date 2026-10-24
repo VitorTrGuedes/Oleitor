@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/api_client.dart';
+import '../../data/favorite_store.dart';
 import '../../data/local_progress_store.dart';
 import '../../data/models.dart';
 import '../manga/manga_detail_screen.dart';
@@ -16,10 +17,16 @@ const _text = Color(0xFFF4F1FA);
 const _subtle = Color(0xFFA6A2AF);
 
 class LibraryHomeScreen extends StatefulWidget {
-  const LibraryHomeScreen({super.key, this.apiClient, required this.onExplore});
+  const LibraryHomeScreen({
+    super.key,
+    this.apiClient,
+    required this.onExplore,
+    this.isActive = true,
+  });
 
   final ApiClient? apiClient;
   final VoidCallback onExplore;
+  final bool isActive;
 
   @override
   State<LibraryHomeScreen> createState() => _LibraryHomeScreenState();
@@ -30,17 +37,31 @@ class _LibraryHomeScreenState extends State<LibraryHomeScreen> {
   final _searchController = TextEditingController();
   Timer? _searchDebounce;
   List<Manga> _manga = [];
+  List<PopularManga> _popularManga = [];
+  List<Manga> _recommendations = [];
   Manga? _resumeManga;
   Chapter? _resumeChapter;
   int? _resumePage;
   int? _resumeTotalPages;
   bool _loading = true;
+  bool _loadingPopular = true;
+  bool _loadingRecommendations = true;
   String? _error;
+  String? _popularError;
+  String? _recommendationsError;
+  int _homeSectionsGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _loadLibrary();
+    _loadHomeSections();
+  }
+
+  @override
+  void didUpdateWidget(covariant LibraryHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) _loadHomeSections();
   }
 
   @override
@@ -102,6 +123,79 @@ class _LibraryHomeScreenState extends State<LibraryHomeScreen> {
     }
   }
 
+  Future<void> _loadHomeSections() async {
+    final generation = ++_homeSectionsGeneration;
+    setState(() {
+      _loadingPopular = true;
+      _loadingRecommendations = true;
+      _popularError = null;
+      _recommendationsError = null;
+    });
+
+    try {
+      final popular = await _api.getPopularManga();
+      if (!mounted || generation != _homeSectionsGeneration) return;
+      setState(() {
+        _popularManga = popular;
+        _loadingPopular = false;
+      });
+    } on Exception catch (error) {
+      if (!mounted || generation != _homeSectionsGeneration) return;
+      setState(() {
+        _popularError = error.toString();
+        _loadingPopular = false;
+      });
+    }
+
+    List<Manga> favorites;
+    try {
+      favorites = await FavoriteStore.getFavorites();
+    } on Exception catch (error) {
+      if (!mounted || generation != _homeSectionsGeneration) return;
+      setState(() {
+        _recommendationsError = error.toString();
+        _loadingRecommendations = false;
+      });
+      return;
+    }
+
+    if (!mounted || generation != _homeSectionsGeneration) return;
+    if (favorites.isEmpty) {
+      setState(() => _loadingRecommendations = false);
+      return;
+    }
+
+    try {
+      final recommendations = await _api.getRecommendations(favorites);
+      final favoriteIds = {
+        for (final favorite in favorites) '${favorite.sourceId}:${favorite.id}',
+      };
+      final uniqueRecommendations = <Manga>[];
+      final seenIds = <String>{};
+      for (final manga in recommendations) {
+        final key = '${manga.sourceId}:${manga.id}';
+        if (!favoriteIds.contains(key) && seenIds.add(key)) {
+          uniqueRecommendations.add(manga);
+        }
+      }
+      if (!mounted || generation != _homeSectionsGeneration) return;
+      setState(() {
+        _recommendations = uniqueRecommendations;
+        _loadingRecommendations = false;
+      });
+    } on Exception catch (error) {
+      if (!mounted || generation != _homeSectionsGeneration) return;
+      setState(() {
+        _recommendationsError = error.toString();
+        _loadingRecommendations = false;
+      });
+    }
+  }
+
+  Future<void> _refreshHome() async {
+    await Future.wait([_loadLibrary(), _loadHomeSections()]);
+  }
+
   void _onSearchChanged(String _) {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(
@@ -110,12 +204,26 @@ class _LibraryHomeScreenState extends State<LibraryHomeScreen> {
     );
   }
 
-  void _openManga(Manga manga) {
-    Navigator.of(context).push(
+  Future<void> _openManga(Manga manga) async {
+    await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => MangaDetailScreen(manga: manga),
       ),
     );
+    if (mounted) await _loadHomeSections();
+  }
+
+  Future<void> _continueReading() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ReaderScreen(
+          manga: _resumeManga!,
+          chapter: _resumeChapter!,
+          initialPage: _resumePage!,
+        ),
+      ),
+    );
+    if (mounted) await _loadHomeSections();
   }
 
   @override
@@ -126,7 +234,7 @@ class _LibraryHomeScreenState extends State<LibraryHomeScreen> {
         child: RefreshIndicator(
           color: _accent,
           backgroundColor: _surface,
-          onRefresh: _loadLibrary,
+          onRefresh: _refreshHome,
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
             children: [
@@ -238,17 +346,13 @@ class _LibraryHomeScreenState extends State<LibraryHomeScreen> {
                   chapter: _resumeChapter!,
                   page: _resumePage!,
                   totalPages: _resumeTotalPages,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => ReaderScreen(
-                        manga: _resumeManga!,
-                        chapter: _resumeChapter!,
-                        initialPage: _resumePage!,
-                      ),
-                    ),
-                  ),
+                  onTap: _continueReading,
                 ),
               ],
+              const SizedBox(height: 28),
+              _buildPopularSection(),
+              const SizedBox(height: 28),
+              _buildRecommendationsSection(),
               const SizedBox(height: 28),
               Row(
                 children: [
@@ -276,6 +380,110 @@ class _LibraryHomeScreenState extends State<LibraryHomeScreen> {
       ),
     );
   }
+
+  Widget _buildPopularSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeading('Mais lidas no Oleitor'),
+        const SizedBox(height: 13),
+        if (_loadingPopular)
+          const Center(child: CircularProgressIndicator(color: _accent))
+        else if (_popularError != null)
+          _HomeMessage(
+            icon: Icons.cloud_off_outlined,
+            title: 'Não foi possível carregar as mais lidas',
+            message: _popularError!,
+            action: TextButton(
+              onPressed: _loadHomeSections,
+              child: const Text('Tentar novamente'),
+            ),
+          )
+        else if (_popularManga.isEmpty)
+          const _HomeMessage(
+            icon: Icons.auto_stories_outlined,
+            title: 'Ainda não há leituras contabilizadas',
+            message:
+                'Cada obra conta uma vez por instalação quando alguém abre seu primeiro capítulo.',
+          )
+        else
+          _mangaCarousel(
+            _popularManga.map((entry) => entry.manga).toList(),
+            readCounts: {
+              for (final entry in _popularManga)
+                '${entry.manga.sourceId}:${entry.manga.id}': entry.readCount,
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRecommendationsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeading('Recomendadas para você'),
+        const SizedBox(height: 13),
+        if (_loadingRecommendations)
+          const Center(child: CircularProgressIndicator(color: _accent))
+        else if (_recommendationsError != null)
+          _HomeMessage(
+            icon: Icons.cloud_off_outlined,
+            title: 'Não foi possível carregar as sugestões',
+            message: _recommendationsError!,
+            action: TextButton(
+              onPressed: _loadHomeSections,
+              child: const Text('Tentar novamente'),
+            ),
+          )
+        else if (_recommendations.isEmpty)
+          _HomeMessage(
+            icon: Icons.favorite_border_rounded,
+            title: 'Salve favoritos para receber sugestões',
+            message: 'Vamos recomendar obras relacionadas às suas favoritas.',
+            action: TextButton(
+              onPressed: widget.onExplore,
+              child: const Text('Explorar obras'),
+            ),
+          )
+        else
+          _mangaCarousel(_recommendations),
+      ],
+    );
+  }
+
+  Widget _sectionHeading(String title) => Text(
+        title,
+        style: const TextStyle(
+          color: _text,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+        ),
+      );
+
+  Widget _mangaCarousel(
+    List<Manga> manga, {
+    Map<String, int> readCounts = const {},
+  }) =>
+      SizedBox(
+        height: 248,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: manga.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 14),
+          itemBuilder: (context, index) {
+            final item = manga[index];
+            return SizedBox(
+              width: 146,
+              child: _LibraryMangaCard(
+                manga: item,
+                readCount: readCounts['${item.sourceId}:${item.id}'],
+                onTap: () => _openManga(item),
+              ),
+            );
+          },
+        ),
+      );
 
   Widget _buildMangaGrid() {
     if (_loading) {
@@ -461,10 +669,15 @@ class _ContinueReadingCard extends StatelessWidget {
 }
 
 class _LibraryMangaCard extends StatelessWidget {
-  const _LibraryMangaCard({required this.manga, required this.onTap});
+  const _LibraryMangaCard({
+    required this.manga,
+    required this.onTap,
+    this.readCount,
+  });
 
   final Manga manga;
   final VoidCallback onTap;
+  final int? readCount;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -512,6 +725,15 @@ class _LibraryMangaCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: _subtle, fontSize: 11),
                     ),
+                    if (readCount != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '$readCount instalações',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _accent, fontSize: 11),
+                      ),
+                    ],
                   ],
                 ),
               ),

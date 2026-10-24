@@ -186,6 +186,54 @@ def test_anilist_search_returns_catalog_only_titles(client, monkeypatch):
     assert pages.status_code == 409
 
 
+def test_anilist_recommendations_are_deduplicated(client, monkeypatch):
+    def handler(request):
+        body = request.read().decode()
+        assert "recommendations(perPage:" in body
+        return Response(
+            200,
+            json={
+                "data": {
+                    "Page": {
+                        "media": [
+                            {
+                                "recommendations": {
+                                    "nodes": [
+                                        {
+                                            "mediaRecommendation": {
+                                                "id": 321,
+                                                "title": {"english": "Suggested"},
+                                                "coverImage": {
+                                                    "large": "https://img.example/suggested.jpg",
+                                                },
+                                                "siteUrl": "https://anilist.co/manga/321",
+                                                "countryOfOrigin": "JP",
+                                                "status": "FINISHED",
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+
+    provider = make_anilist_provider(handler)
+    monkeypatch.setitem(source_registry._providers, "anilist", provider)
+
+    response = client.post(
+        "/api/v1/recommendations",
+        json={"favorite_titles": ["Favorite One", "Favorite Two"]},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["source_manga_id"] == "321"
+    assert response.json()[0]["title"] == "Suggested"
+
+
 def test_source_errors_are_reported(client, monkeypatch):
     provider = make_provider(lambda request: Response(503))
     monkeypatch.setitem(source_registry._providers, "mangadex", provider)
