@@ -9,6 +9,7 @@ class Manga {
     this.sourceId,
     this.sourceUrl,
     this.status,
+    this.supportsReading = true,
   });
 
   final String id;
@@ -20,6 +21,7 @@ class Manga {
   final String? sourceId;
   final String? sourceUrl;
   final String? status;
+  final bool supportsReading;
 
   bool get isExternal => sourceId != null;
 
@@ -43,6 +45,7 @@ class Manga {
         sourceId: json['source_id'] as String,
         sourceUrl: json['source_url'] as String?,
         status: json['status'] as String?,
+        supportsReading: json['supports_reading'] as bool? ?? true,
       );
 }
 

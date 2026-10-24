@@ -35,6 +35,9 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
 
   Future<(Manga, List<Chapter>)> _loadDetails() async {
     if (widget.manga.isExternal) {
+      if (!widget.manga.supportsReading) {
+        return (widget.manga, const <Chapter>[]);
+      }
       final chapters = await _api.getSourceChapters(
         sourceId: widget.manga.sourceId!,
         mangaId: widget.manga.id,
@@ -286,9 +289,13 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
               ),
               const SizedBox(height: 8),
               if (chapters.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Text('Nenhum capítulo disponível ainda.'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: Text(
+                    manga.isExternal && !manga.supportsReading
+                        ? 'Esta fonte oferece informações do título, mas não capítulos para leitura.'
+                        : 'Nenhum capítulo disponível ainda.',
+                  ),
                 )
               else
                 ...chapters.map(

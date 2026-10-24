@@ -55,11 +55,14 @@ class ProgressOut(BaseModel):
 class SourceOut(BaseModel):
     id: str
     name: str
+    supports_reading: bool
+    supports_language_filter: bool
 
 
 class SourceMangaOut(BaseModel):
     source_id: str
     source_manga_id: str
+    supports_reading: bool
     title: str
     description: str | None
     cover_url: str | None

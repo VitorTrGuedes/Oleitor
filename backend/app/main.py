@@ -56,7 +56,12 @@ def health() -> dict[str, str]:
 @app.get("/api/v1/sources", response_model=list[SourceOut])
 def list_sources() -> list[SourceOut]:
     return [
-        SourceOut(id=provider.source_id, name=provider.name)
+        SourceOut(
+            id=provider.source_id,
+            name=provider.name,
+            supports_reading=provider.supports_reading,
+            supports_language_filter=provider.supports_language_filter,
+        )
         for provider in source_registry.list()
     ]
 
@@ -81,19 +86,28 @@ def search_source_manga(
         raise source_failure(provider, exc) from exc
 
 
+def ensure_source_supports_reading(provider: SourceProvider) -> None:
+    if not provider.supports_reading:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A fonte {provider.name} oferece catálogo, mas não capítulos para leitura.",
+        )
+
+
 @app.get(
     "/api/v1/sources/{source_id}/manga/{manga_id}/chapters",
     response_model=list[SourceChapterOut],
 )
 def list_source_chapters(
     provider: Source,
-    manga_id: UUID,
+    manga_id: str,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     language: Annotated[str | None, Query(min_length=2, max_length=10)] = "pt-br",
 ) -> list[SourceChapterOut]:
+    ensure_source_supports_reading(provider)
     try:
-        return provider.list_chapters(str(manga_id), limit, skip, language)
+        return provider.list_chapters(manga_id, limit, skip, language)
     except SourceError as exc:
         raise source_failure(provider, exc) from exc
 
@@ -104,10 +118,11 @@ def list_source_chapters(
 )
 def list_source_pages(
     provider: Source,
-    chapter_id: UUID,
+    chapter_id: str,
 ) -> list[SourcePageOut]:
+    ensure_source_supports_reading(provider)
     try:
-        return provider.get_pages(str(chapter_id))
+        return provider.get_pages(chapter_id)
     except SourceError as exc:
         raise source_failure(provider, exc) from exc
 

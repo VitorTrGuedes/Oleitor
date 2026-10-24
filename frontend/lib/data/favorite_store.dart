@@ -48,6 +48,7 @@ class FavoriteStore {
           'source_url': manga.sourceUrl,
           'language': manga.language,
           'status': manga.status,
+          'supports_reading': manga.supportsReading,
         }),
       );
     }

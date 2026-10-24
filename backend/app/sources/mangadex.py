@@ -11,6 +11,8 @@ from app.sources.base import SourceError
 class MangaDexProvider:
     source_id = "mangadex"
     name = "MangaDex"
+    supports_reading = True
+    supports_language_filter = True
 
     def __init__(self, client: httpx.Client | None = None) -> None:
         self._client = client or httpx.Client(
@@ -170,6 +172,7 @@ class MangaDexProvider:
         return SourceMangaOut(
             source_id="mangadex",
             source_manga_id=manga_id,
+            supports_reading=cls.supports_reading,
             title=title,
             description=description,
             cover_url=cover_url,

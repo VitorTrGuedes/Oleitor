@@ -10,6 +10,8 @@ class SourceError(RuntimeError):
 class SourceProvider(Protocol):
     source_id: str
     name: str
+    supports_reading: bool
+    supports_language_filter: bool
 
     def search(
         self,

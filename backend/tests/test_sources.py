@@ -2,6 +2,7 @@ from httpx import Client, MockTransport, Response
 
 from app.main import app
 from app.sources import source_registry
+from app.sources.anilist import AniListProvider
 from app.sources.mangadex import MangaDexProvider
 
 MANGA_ID = "00000000-0000-4000-8000-000000000001"
@@ -14,6 +15,14 @@ def make_provider(handler):
         transport=MockTransport(handler),
     )
     return MangaDexProvider(client)
+
+
+def make_anilist_provider(handler):
+    client = Client(
+        base_url="https://graphql.anilist.co",
+        transport=MockTransport(handler),
+    )
+    return AniListProvider(client)
 
 
 def test_mangadex_search_chapters_and_pages(client, monkeypatch):
@@ -77,7 +86,20 @@ def test_mangadex_search_chapters_and_pages(client, monkeypatch):
     monkeypatch.setitem(source_registry._providers, "mangadex", provider)
 
     sources = client.get("/api/v1/sources")
-    assert sources.json() == [{"id": "mangadex", "name": "MangaDex"}]
+    assert sources.json() == [
+        {
+            "id": "mangadex",
+            "name": "MangaDex",
+            "supports_reading": True,
+            "supports_language_filter": True,
+        },
+        {
+            "id": "anilist",
+            "name": "AniList (catálogo)",
+            "supports_reading": False,
+            "supports_language_filter": False,
+        },
+    ]
 
     mangas = client.get(
         "/api/v1/sources/mangadex/manga",
@@ -102,6 +124,66 @@ def test_mangadex_search_chapters_and_pages(client, monkeypatch):
     assert pages.json()[0]["image_url"] == (
         "https://uploads.mangadex.org/data/hash/1.jpg"
     )
+
+
+def test_anilist_search_returns_catalog_only_titles(client, monkeypatch):
+    def handler(request):
+        body = request.read().decode()
+        assert '"search":"Solo Leveling"' in body
+        assert '"page":6' in body
+        return Response(
+            200,
+            json={
+                "data": {
+                    "Page": {
+                        "media": [
+                            {
+                                "id": 123,
+                                "title": {
+                                    "english": "Solo Leveling",
+                                    "romaji": "Ore dake Level Up na Ken",
+                                },
+                                "description": "A <b>hunter</b> &amp; a dungeon.",
+                                "coverImage": {
+                                    "extraLarge": "https://img.example/cover.jpg",
+                                },
+                                "siteUrl": "https://anilist.co/manga/123",
+                                "countryOfOrigin": "KR",
+                                "status": "FINISHED",
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+
+    provider = make_anilist_provider(handler)
+    monkeypatch.setitem(source_registry._providers, "anilist", provider)
+
+    response = client.get(
+        "/api/v1/sources/anilist/manga",
+        params={"search": "Solo Leveling", "skip": 50, "limit": 10, "language": "pt-br"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0] == {
+        "source_id": "anilist",
+        "source_manga_id": "123",
+        "supports_reading": False,
+        "title": "Solo Leveling",
+        "description": "A hunter & a dungeon.",
+        "cover_url": "https://img.example/cover.jpg",
+        "source_url": "https://anilist.co/manga/123",
+        "authors": [],
+        "language": "ko",
+        "status": "FINISHED",
+    }
+
+    chapters = client.get("/api/v1/sources/anilist/manga/123/chapters")
+    assert chapters.status_code == 409
+    assert "não capítulos para leitura" in chapters.json()["detail"]
+    pages = client.get("/api/v1/sources/anilist/chapters/456/pages")
+    assert pages.status_code == 409
 
 
 def test_source_errors_are_reported(client, monkeypatch):

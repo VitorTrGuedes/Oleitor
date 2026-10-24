@@ -1,4 +1,5 @@
 from app.sources.base import SourceProvider
+from app.sources.anilist import AniListProvider
 from app.sources.mangadex import MangaDexProvider
 
 
@@ -26,3 +27,4 @@ def register_source(provider: SourceProvider) -> None:
 
 
 register_source(MangaDexProvider())
+register_source(AniListProvider())

@@ -479,6 +479,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       for (final source in _sources)
         source['id'] as String: source['name'] as String,
     };
+    final supportsLanguageFilter = _sources
+        .where((source) => source['id'] == _sourceId)
+        .any((source) => source['supports_language_filter'] != false);
     return Scaffold(
       backgroundColor: const Color(0xFF141318),
       appBar: AppBar(
@@ -549,26 +552,38 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Expanded(
-                      child: _FilterDropdown<String>(
-                        value: _language,
-                        hint: 'Idioma',
-                        items: const {
-                          'pt-br': 'Português',
-                          'en': 'Inglês',
-                          'es': 'Espanhol',
-                        },
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setState(() => _language = value);
-                          if (_searchController.text.trim().isNotEmpty) {
-                            _search();
-                          }
-                        },
+                    if (supportsLanguageFilter)
+                      Expanded(
+                        child: _FilterDropdown<String>(
+                          value: _language,
+                          hint: 'Idioma',
+                          items: const {
+                            'pt-br': 'Português',
+                            'en': 'Inglês',
+                            'es': 'Espanhol',
+                          },
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() => _language = value);
+                            if (_searchController.text.trim().isNotEmpty) {
+                              _search();
+                            }
+                          },
+                        ),
                       ),
-                    ),
                   ],
                 ),
+                if (!supportsLanguageFilter)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Esta fonte é um catálogo e não oferece capítulos para leitura.',
+                        style: TextStyle(color: _muted, fontSize: 12),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
